@@ -5,6 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
   MONGODB_URI: z.string().min(1),
+  MONGODB_DB_NAME: z.string().min(1).default("rhiagt"),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default("8h"),
   CORS_ORIGIN: z.string().default("http://localhost:8080"),

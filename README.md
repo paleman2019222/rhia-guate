@@ -11,7 +11,7 @@ Monorepo para la plataforma multiempresa de Recursos Humanos RHIA.
 
 ## Inicio local
 
-1. Copia `apps/api/.env.example` a `apps/api/.env` y configura MongoDB, JWT y secretos n8n.
+1. Copia `apps/api/.env.example` a `apps/api/.env` y configura MongoDB, JWT y secretos n8n. `MONGODB_DB_NAME` selecciona la base de datos (por defecto `rhiagt`); en MongoDB Atlas se crea al guardar el primer documento.
 2. Copia `apps/web/.env.example` a `apps/web/.env` si la API no estará en `http://localhost:3001`.
 3. Ejecuta `npm install` desde la raíz.
 4. Ejecuta `npm run seed:plans` y después `npm run bootstrap:superadmin`.

@@ -4,13 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node ../../node_modules/vite/bin/vite.js",
-    "build": "node ../../node_modules/vite/bin/vite.js build",
-    "build:dev": "node ../../node_modules/vite/bin/vite.js build --mode development",
-    "lint": "node ../../node_modules/eslint/bin/eslint.js .",
-    "preview": "node ../../node_modules/vite/bin/vite.js preview",
-    "test": "node ../../node_modules/vitest/vitest.mjs run",
-    "test:watch": "node ../../node_modules/vitest/vitest.mjs"
+    "dev": "vite",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
