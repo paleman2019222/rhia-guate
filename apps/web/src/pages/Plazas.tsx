@@ -59,6 +59,7 @@ const workTypeToApi: Record<string, "full_time" | "part_time" | "contract" | "re
 type ApiVacancy = { _id: string; publicId?: string; title: string; department: string; location: string; workType: "full_time" | "part_time" | "contract" | "remote"; salaryMin?: number; salaryMax?: number; description: string; requirements: string[]; status: "draft" | "published" | "closed"; createdAt: string; metrics?: { applicationCount: number; analyzedCount: number; topScore: number | null; averageScore: number | null } };
 type ApiCandidate = {
   _id: string;
+  vacancy?: string | { _id: string; title: string };
   name: string;
   email: string;
   phone?: string;
@@ -83,7 +84,7 @@ type ApiCandidate = {
 };
 
 const scoreFor = (candidate: ApiCandidate): number | null =>
-  candidate.analysis.status === "completed" && candidate.analysis.isValidCV !== false && typeof candidate.analysis.score === "number"
+  candidate.analysis?.status === "completed" && candidate.analysis.isValidCV !== false && typeof candidate.analysis.score === "number"
     ? candidate.analysis.score
     : null;
 
@@ -100,6 +101,25 @@ const statusFor = (candidate: ApiCandidate) => candidate.analysis.isValidCV === 
   : analysisStatusLabel[candidate.analysis.status];
 
 const recommendationLabel = { advance: "Avanzar", review: "Revisar", reject: "No priorizar" };
+
+function metricsFromCandidates(candidates: ApiCandidate[]) {
+  const counts = new Map<string, { applicationCount: number; analyzedCount: number; scoredCount: number; scoreSum: number; topScore: number | null }>();
+  for (const candidate of candidates) {
+    const vacancyId = typeof candidate.vacancy === "string" ? candidate.vacancy : candidate.vacancy?._id;
+    if (!vacancyId) continue;
+    const item = counts.get(vacancyId) ?? { applicationCount: 0, analyzedCount: 0, scoredCount: 0, scoreSum: 0, topScore: null };
+    item.applicationCount += 1;
+    if (candidate.analysis?.status === "completed") item.analyzedCount += 1;
+    const score = scoreFor(candidate);
+    if (score !== null) {
+      item.scoredCount += 1;
+      item.scoreSum += score;
+      item.topScore = Math.max(item.topScore ?? score, score);
+    }
+    counts.set(vacancyId, item);
+  }
+  return counts;
+}
 
 const toPlaza = (vacancy: ApiVacancy): Plaza => ({
   id: vacancy._id,
@@ -141,11 +161,21 @@ const Plazas = () => {
   const loadVacancies = useCallback(async () => {
     setLoadingVacancies(true);
     try {
-      const [vacancies, tenant] = await Promise.all([
+      const [vacancies, tenant, applications] = await Promise.all([
         api<{ data: ApiVacancy[] }>("/vacancies"),
         api<{ data: { slug: string } }>("/tenants/current"),
+        api<{ data: ApiCandidate[] }>("/candidates"),
       ]);
-      setPlazas(vacancies.data.map(toPlaza));
+      const counts = metricsFromCandidates(applications.data);
+      setPlazas(vacancies.data.map((vacancy) => {
+        const item = counts.get(vacancy._id);
+        return toPlaza({ ...vacancy, metrics: {
+          applicationCount: item?.applicationCount ?? 0,
+          analyzedCount: item?.analyzedCount ?? 0,
+          topScore: item?.topScore ?? null,
+          averageScore: item?.scoredCount ? Math.round(item.scoreSum / item.scoredCount) : null,
+        } });
+      }));
       setCompanySlug(tenant.data.slug);
       setError(null);
     } catch (caught) {

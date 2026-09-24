@@ -12,13 +12,12 @@ type Vacancy = {
   title: string;
   department: string;
   status: "draft" | "published" | "closed";
-  metrics: { applicationCount: number; analyzedCount: number; topScore: number | null };
 };
 
 type Candidate = {
   _id: string;
   name: string;
-  vacancy?: { title: string };
+  vacancy?: { _id: string; title: string };
   createdAt: string;
   analysis?: { status: string; score?: number; isValidCV?: boolean };
 };
@@ -53,8 +52,19 @@ const Dashboard = () => {
   useEffect(() => { void load(); }, [load]);
 
   const activeVacancies = vacancies.filter((vacancy) => vacancy.status === "published");
-  const totalCVs = vacancies.reduce((total, vacancy) => total + (vacancy.metrics?.applicationCount ?? 0), 0);
-  const analyzedCVs = vacancies.reduce((total, vacancy) => total + (vacancy.metrics?.analyzedCount ?? 0), 0);
+  const totalCVs = candidates.length;
+  const analyzedCVs = candidates.filter((candidate) => candidate.analysis?.status === "completed").length;
+  const candidatesByVacancy = new Map<string, Candidate[]>();
+  const topScoreByVacancy = new Map<string, number>();
+  for (const candidate of candidates) {
+    const vacancyId = candidate.vacancy?._id;
+    if (!vacancyId) continue;
+    candidatesByVacancy.set(vacancyId, [...(candidatesByVacancy.get(vacancyId) ?? []), candidate]);
+    const score = candidate.analysis?.score;
+    if (candidate.analysis?.status === "completed" && candidate.analysis.isValidCV !== false && typeof score === "number" && Number.isFinite(score)) {
+      topScoreByVacancy.set(vacancyId, Math.max(topScoreByVacancy.get(vacancyId) ?? score, score));
+    }
+  }
   const recentCandidates = [...candidates].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
 
   return (
@@ -89,8 +99,8 @@ const Dashboard = () => {
               <div key={vacancy._id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background p-4">
                 <div><p className="font-medium">{vacancy.title}</p><p className="text-sm text-muted-foreground">{vacancy.department}</p></div>
                 <div className="flex items-center gap-6 text-right">
-                  <div><p className="font-semibold">{vacancy.metrics?.applicationCount ?? 0}</p><p className="text-xs text-muted-foreground">CVs recibidos</p></div>
-                  <div><p className="font-semibold text-primary">{vacancy.metrics?.topScore == null ? "—" : `${vacancy.metrics.topScore}%`}</p><p className="text-xs text-muted-foreground">mejor evaluación</p></div>
+                  <div><p className="font-semibold">{candidatesByVacancy.get(vacancy._id)?.length ?? 0}</p><p className="text-xs text-muted-foreground">CVs recibidos</p></div>
+                  <div><p className="font-semibold text-primary">{topScoreByVacancy.has(vacancy._id) ? `${topScoreByVacancy.get(vacancy._id)}%` : "—"}</p><p className="text-xs text-muted-foreground">mejor evaluación</p></div>
                 </div>
               </div>
             ))}
