@@ -1,0 +1,22 @@
+{
+  "name": "rhia-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@rhia/api",
+    "dev:web": "npm run dev --workspace=@rhia/web",
+    "dev:api": "npm run dev --workspace=@rhia/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "seed:plans": "npm run seed:plans --workspace=@rhia/api",
+    "bootstrap:superadmin": "npm run bootstrap:superadmin --workspace=@rhia/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

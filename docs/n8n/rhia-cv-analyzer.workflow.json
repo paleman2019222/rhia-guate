@@ -1,0 +1,88 @@
+{
+  "name": "RHIA - CV Analyzer Callback Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rhia-cv-analysis",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "171d71ac-1c73-4d9e-9ad4-faad87f0fb31",
+      "name": "Receive RHIA request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [300, 300],
+      "webhookId": "rhia-cv-analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $input.first().json;\nconst expectedToken = $env.RHIA_N8N_OUTBOUND_TOKEN;\nconst receivedToken = request.headers?.['x-rhia-workflow-token'];\nif (!expectedToken || receivedToken !== expectedToken) {\n  throw new Error('Invalid RHIA workflow token');\n}\nreturn [{ json: request.body }];"
+      },
+      "id": "0d4d8fe0-b8b8-417c-b58d-16e022d67c44",
+      "name": "Validate RHIA token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "response-request-id", "name": "requestId", "value": "={{ $json.requestId }}", "type": "string" },
+            { "id": "response-callback", "name": "callbackUrl", "value": "={{ $json.callbackUrl }}", "type": "string" },
+            { "id": "response-status", "name": "status", "value": "completed", "type": "string" },
+            { "id": "response-valid-cv", "name": "isValidCV", "value": "true", "type": "boolean" },
+            { "id": "response-security-status", "name": "securityStatus", "value": "clean", "type": "string" },
+            { "id": "response-security-flags", "name": "securityFlags", "value": "=[]", "type": "array" },
+            { "id": "response-confidence", "name": "confidence", "value": "0", "type": "number" },
+            { "id": "response-score", "name": "score", "value": "0", "type": "number" },
+            { "id": "response-summary", "name": "summary", "value": "Replace this node with CV extraction and your AI model before production.", "type": "string" },
+            { "id": "response-strengths", "name": "strengths", "value": "=[]", "type": "array" },
+            { "id": "response-gaps", "name": "gaps", "value": "=[]", "type": "array" },
+            { "id": "response-recommendation", "name": "recommendation", "value": "review", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e96001c3-ed92-4a6a-b4e6-cd99714f2931",
+      "name": "Replace with extraction and AI",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callbackUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-n8n-callback-secret", "value": "={{ $env.RHIA_N8N_CALLBACK_SECRET }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { requestId: $json.requestId, status: $json.status, isValidCV: $json.isValidCV, securityStatus: $json.securityStatus, securityFlags: $json.securityFlags, confidence: $json.confidence, score: $json.score, summary: $json.summary, strengths: $json.strengths, gaps: $json.gaps, recommendation: $json.recommendation } }}",
+        "options": {}
+      },
+      "id": "b5d1e871-e9d9-415c-bb5a-3db74b7bef47",
+      "name": "Send RHIA callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive RHIA request": { "main": [[{ "node": "Validate RHIA token", "type": "main", "index": 0 }]] },
+    "Validate RHIA token": { "main": [[{ "node": "Replace with extraction and AI", "type": "main", "index": 0 }]] },
+    "Replace with extraction and AI": { "main": [[{ "node": "Send RHIA callback", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "dd52068f-0a2b-4df5-8d97-eace3b8c47c1",
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
