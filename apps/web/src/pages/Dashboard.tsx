@@ -1,147 +1,126 @@
-import { Briefcase, Users, FileText, CalendarClock, AlertTriangle, TrendingUp, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { Briefcase, FileText, RefreshCw, Sparkles, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import StatCard from "@/components/StatCard";
+import { useAuth } from "@/auth/AuthContext";
+import { api, ApiClientError } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
-const vacationAlerts = [
-  { name: "Carlos López", action: "Sale de vacaciones", date: "8 Mar 2026", type: "leaving" as const },
-  { name: "Ana Martínez", action: "Regresa de vacaciones", date: "10 Mar 2026", type: "returning" as const },
-  { name: "José García", action: "Sale de vacaciones", date: "15 Mar 2026", type: "leaving" as const },
-  { name: "María Pérez", action: "Regresa de vacaciones", date: "12 Mar 2026", type: "returning" as const },
-];
+type Vacancy = {
+  _id: string;
+  title: string;
+  department: string;
+  status: "draft" | "published" | "closed";
+  metrics: { applicationCount: number; analyzedCount: number; topScore: number | null };
+};
 
-const activePlazas = [
-  { title: "Desarrollador Full Stack", cvs: 47, score: 85, department: "Tecnología" },
-  { title: "Analista Contable", cvs: 23, score: 72, department: "Finanzas" },
-  { title: "Diseñador UX/UI", cvs: 31, score: 90, department: "Producto" },
-];
-
-const recentActivity = [
-  { text: "IA analizó 12 CVs para Desarrollador Full Stack", time: "Hace 2 horas" },
-  { text: "Nuevo CV recibido para Analista Contable", time: "Hace 3 horas" },
-  { text: "Planilla de febrero generada exitosamente", time: "Ayer" },
-  { text: "Expediente actualizado: Roberto Sánchez", time: "Ayer" },
-];
+type Candidate = {
+  _id: string;
+  name: string;
+  vacancy?: { title: string };
+  createdAt: string;
+  analysis?: { status: string; score?: number; isValidCV?: boolean };
+};
 
 const Dashboard = () => {
+  const { user } = useAuth();
+  const [vacancies, setVacancies] = useState<Vacancy[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [employeeCount, setEmployeeCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [vacancyResponse, candidateResponse, employeeResponse] = await Promise.all([
+        api<{ data: Vacancy[] }>("/vacancies"),
+        api<{ data: Candidate[] }>("/candidates"),
+        api<{ data: unknown[] }>("/employees"),
+      ]);
+      setVacancies(vacancyResponse.data);
+      setCandidates(candidateResponse.data);
+      setEmployeeCount(employeeResponse.data.length);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof ApiClientError ? caught.message : "No se pudo cargar el resumen");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const activeVacancies = vacancies.filter((vacancy) => vacancy.status === "published");
+  const totalCVs = vacancies.reduce((total, vacancy) => total + (vacancy.metrics?.applicationCount ?? 0), 0);
+  const analyzedCVs = vacancies.reduce((total, vacancy) => total + (vacancy.metrics?.analyzedCount ?? 0), 0);
+  const recentCandidates = [...candidates].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
+
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <motion.h1
-          initial={{ opacity: 0, x: -12 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="font-display text-3xl font-bold text-foreground"
-        >
-          Buenos días, María 👋
-        </motion.h1>
-        <p className="mt-1 text-muted-foreground">
-          Aquí tienes un resumen de tu equipo hoy, 4 de marzo 2026
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Hola, {user?.name ?? "bienvenido"}</h1>
+          <p className="mt-1 text-muted-foreground">Resumen actualizado de tu empresa</p>
+        </div>
+        <Button variant="outline" className="gap-2" onClick={() => void load()} disabled={loading}>
+          <RefreshCw className="h-4 w-4" /> Actualizar
+        </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Briefcase} title="Plazas Activas" value={3} subtitle="2 nuevas esta semana" variant="primary" />
-        <StatCard icon={FileText} title="CVs Recibidos" value={101} subtitle="47 analizados por IA" trend={{ value: "23% vs mes anterior", positive: true }} />
-        <StatCard icon={Users} title="Empleados" value={84} subtitle="3 nuevos ingresos" />
-        <StatCard icon={TrendingUp} title="Planilla Mes" value="Q 342,800" subtitle="Febrero 2026" />
+      {error && <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={Briefcase} title="Plazas publicadas" value={loading ? "—" : activeVacancies.length} variant="primary" />
+        <StatCard icon={FileText} title="CVs recibidos" value={loading ? "—" : totalCVs} subtitle="Todas las plazas" />
+        <StatCard icon={Sparkles} title="Análisis completados" value={loading ? "—" : analyzedCVs} subtitle={loading ? undefined : `De ${totalCVs} CVs recibidos`} />
+        <StatCard icon={Users} title="Empleados registrados" value={loading ? "—" : employeeCount} />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Active Positions */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="lg:col-span-2 rounded-xl border border-border bg-card p-6"
-        >
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-display text-lg font-semibold text-card-foreground">Plazas Activas</h2>
-            <div className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
-              <Sparkles className="h-3 w-3" />
-              IA Activa
-            </div>
-          </div>
-          <div className="space-y-4">
-            {activePlazas.map((plaza, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between rounded-lg border border-border bg-background p-4 transition-colors hover:bg-accent/50"
-              >
-                <div>
-                  <p className="font-medium text-card-foreground">{plaza.title}</p>
-                  <p className="text-sm text-muted-foreground">{plaza.department}</p>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-card-foreground">{plaza.cvs} CVs</p>
-                    <p className="text-xs text-muted-foreground">recibidos</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-16 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${plaza.score}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-semibold text-primary">{plaza.score}%</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Vacation Alerts */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="rounded-xl border border-border bg-card p-6"
-        >
-          <div className="flex items-center gap-2 mb-5">
-            <CalendarClock className="h-5 w-5 text-primary" />
-            <h2 className="font-display text-lg font-semibold text-card-foreground">Vacaciones</h2>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card p-6 lg:col-span-2">
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="font-display text-lg font-semibold">Plazas publicadas</h2>
+            <Link to="/plazas" className="text-sm font-medium text-primary hover:underline">Ver todas</Link>
           </div>
           <div className="space-y-3">
-            {vacationAlerts.map((alert, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-background p-3">
-                <div
-                  className={`mt-0.5 h-2 w-2 rounded-full ${
-                    alert.type === "leaving" ? "bg-warning" : "bg-success"
-                  }`}
-                />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-card-foreground">{alert.name}</p>
-                  <p className="text-xs text-muted-foreground">{alert.action}</p>
-                  <p className="mt-0.5 text-xs font-medium text-muted-foreground">{alert.date}</p>
+            {activeVacancies.map((vacancy) => (
+              <div key={vacancy._id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background p-4">
+                <div><p className="font-medium">{vacancy.title}</p><p className="text-sm text-muted-foreground">{vacancy.department}</p></div>
+                <div className="flex items-center gap-6 text-right">
+                  <div><p className="font-semibold">{vacancy.metrics?.applicationCount ?? 0}</p><p className="text-xs text-muted-foreground">CVs recibidos</p></div>
+                  <div><p className="font-semibold text-primary">{vacancy.metrics?.topScore == null ? "—" : `${vacancy.metrics.topScore}%`}</p><p className="text-xs text-muted-foreground">mejor evaluación</p></div>
                 </div>
               </div>
             ))}
+            {!loading && activeVacancies.length === 0 && <p className="text-sm text-muted-foreground">No hay plazas publicadas. Crea una desde Plazas.</p>}
           </div>
-        </motion.div>
+        </motion.section>
+
+        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card p-6">
+          <h2 className="font-display text-lg font-semibold">Estado de análisis</h2>
+          <div className="mt-5 space-y-3">
+            <div className="flex justify-between rounded-lg bg-muted/40 p-3"><span>Completados</span><strong>{candidates.filter((candidate) => candidate.analysis?.status === "completed").length}</strong></div>
+            <div className="flex justify-between rounded-lg bg-muted/40 p-3"><span>En cola o procesando</span><strong>{candidates.filter((candidate) => candidate.analysis?.status === "queued" || candidate.analysis?.status === "processing").length}</strong></div>
+            <div className="flex justify-between rounded-lg bg-muted/40 p-3"><span>Fallidos</span><strong>{candidates.filter((candidate) => candidate.analysis?.status === "failed").length}</strong></div>
+            <div className="flex justify-between rounded-lg bg-muted/40 p-3"><span>Sin solicitar</span><strong>{candidates.filter((candidate) => !candidate.analysis || candidate.analysis.status === "not_requested").length}</strong></div>
+          </div>
+        </motion.section>
       </div>
 
-      {/* Recent Activity */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="rounded-xl border border-border bg-card p-6"
-      >
-        <h2 className="font-display text-lg font-semibold text-card-foreground mb-4">Actividad Reciente</h2>
-        <div className="space-y-3">
-          {recentActivity.map((item, i) => (
-            <div key={i} className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
-              <div className="flex items-center gap-3">
-                <div className="h-2 w-2 rounded-full bg-primary" />
-                <p className="text-sm text-card-foreground">{item.text}</p>
-              </div>
-              <p className="text-xs text-muted-foreground whitespace-nowrap">{item.time}</p>
+      <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card p-6">
+        <h2 className="font-display text-lg font-semibold">Postulaciones recientes</h2>
+        <div className="mt-4 space-y-3">
+          {recentCandidates.map((candidate) => (
+            <div key={candidate._id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 last:border-0 last:pb-0">
+              <div><p className="text-sm font-medium">{candidate.name}</p><p className="text-xs text-muted-foreground">{candidate.vacancy?.title ?? "Plaza no disponible"} · {new Date(candidate.createdAt).toLocaleDateString("es-GT")}</p></div>
+              <span className="text-sm font-medium text-primary">{candidate.analysis?.status === "completed" && candidate.analysis.isValidCV !== false && typeof candidate.analysis.score === "number" ? `${candidate.analysis.score}%` : "Sin calificación"}</span>
             </div>
           ))}
+          {!loading && recentCandidates.length === 0 && <p className="text-sm text-muted-foreground">Aún no hay postulaciones.</p>}
         </div>
-      </motion.div>
+      </motion.section>
     </div>
   );
 };

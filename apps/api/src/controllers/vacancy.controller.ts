@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { Types } from "mongoose";
 import { z } from "zod";
+import { Candidate } from "../models/Candidate.js";
 import { Vacancy } from "../models/Vacancy.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -24,12 +26,53 @@ const vacancySchema = vacancyBaseSchema.refine((data) => data.salaryMin === unde
 
 export const listVacancies = asyncHandler(async (req, res) => {
   const tenant = getTenantId(req);
+  if (!Types.ObjectId.isValid(tenant)) throw new ApiError(400, "Invalid tenant ID");
   const status = z.enum(["draft", "published", "closed"]).optional().parse(req.query.status);
   const search = z.string().max(100).optional().parse(req.query.search);
   const filter: Record<string, unknown> = { tenant };
   if (status) filter.status = status;
   if (search) filter.$or = [{ title: { $regex: search, $options: "i" } }, { department: { $regex: search, $options: "i" } }];
-  res.json({ data: await Vacancy.find(filter).sort({ createdAt: -1 }).lean() });
+  const scored = {
+    $and: [
+      { $eq: ["$analysis.status", "completed"] },
+      { $isNumber: "$analysis.score" },
+      { $ne: ["$analysis.isValidCV", false] },
+    ],
+  };
+  const [vacancies, metrics] = await Promise.all([
+    Vacancy.find(filter).sort({ createdAt: -1 }).lean(),
+    Candidate.aggregate<{
+      _id: Types.ObjectId;
+      applicationCount: number;
+      analyzedCount: number;
+      scoredCount: number;
+      topScore: number | null;
+      scoreSum: number;
+    }>([
+      { $match: { tenant: new Types.ObjectId(tenant) } },
+      { $group: {
+        _id: "$vacancy",
+        applicationCount: { $sum: 1 },
+        analyzedCount: { $sum: { $cond: [{ $eq: ["$analysis.status", "completed"] }, 1, 0] } },
+        scoredCount: { $sum: { $cond: [scored, 1, 0] } },
+        topScore: { $max: { $cond: [scored, "$analysis.score", null] } },
+        scoreSum: { $sum: { $cond: [scored, "$analysis.score", 0] } },
+      } },
+    ]),
+  ]);
+  const byVacancy = new Map(metrics.map((item) => [String(item._id), item]));
+  res.json({ data: vacancies.map((vacancy) => {
+    const item = byVacancy.get(String(vacancy._id));
+    return {
+      ...vacancy,
+      metrics: {
+        applicationCount: item?.applicationCount ?? 0,
+        analyzedCount: item?.analyzedCount ?? 0,
+        topScore: item?.topScore ?? null,
+        averageScore: item?.scoredCount ? Math.round(item.scoreSum / item.scoredCount) : null,
+      },
+    };
+  }) });
 });
 
 export const getVacancy = asyncHandler(async (req, res) => {

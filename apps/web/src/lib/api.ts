@@ -54,3 +54,18 @@ export async function publicApi<T>(path: string, init: RequestInit = {}): Promis
   if (!response.ok) throw new ApiClientError(response.status, body?.error ?? "API request failed", body?.details);
   return body as T;
 }
+
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = getAccessToken();
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  const activeTenantId = getActiveTenantId();
+  if (activeTenantId) headers.set("x-tenant-id", activeTenantId);
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined) as { error?: string } | undefined;
+    throw new ApiClientError(response.status, body?.error ?? "No se pudo descargar el archivo");
+  }
+  return response.blob();
+}

@@ -47,7 +47,7 @@ Estas rutas requieren `super_admin`. El portal web `/admin` permite activar/desa
 
 | Método y ruta | Roles | Descripción |
 |---|---|---|
-| `GET /vacancies?status=&search=` | Autenticado | Lista vacantes de la empresa. |
+| `GET /vacancies?status=&search=` | Autenticado | Lista vacantes de la empresa con `metrics.applicationCount`, `analyzedCount`, `topScore` y `averageScore` calculados a partir de postulaciones reales. Los puntajes no disponibles son `null`. |
 | `POST /vacancies` | Admin, HR | Crea una vacante. |
 | `GET /vacancies/:vacancyId` | Autenticado | Detalle de una vacante. |
 | `PATCH /vacancies/:vacancyId` | Admin, HR | Actualiza o cierra una vacante. |
@@ -60,6 +60,7 @@ Estas rutas requieren `super_admin`. El portal web `/admin` permite activar/desa
 | `GET /candidates?vacancyId=` | Autenticado | Lista candidatos, opcionalmente por plaza. |
 | `POST /candidates` | Admin, HR + `cvAnalyzer` | `multipart/form-data`; requiere `vacancyId`, `name`, `email` y `cvText` o `document`. |
 | `GET /candidates/:candidateId` | Autenticado | Devuelve candidato y resultado. |
+| `GET /candidates/:candidateId/document` | Autenticado | Descarga el CV adjunto de un candidato de la empresa. Devuelve 404 si el archivo ya no existe en el almacenamiento local. |
 | `POST /candidates/:candidateId/analyze` | Admin, HR + `cvAnalyzer` | Encola el análisis en n8n y devuelve 202. |
 | `POST /integrations/n8n/cv-analysis/callback` | Secret n8n | Recibe resultado firmado, sin JWT. |
 | `GET /integrations/n8n/email/companies/:companySlug/vacancies?title=` | Token workflow | Obtiene la plaza publicada por título exacto para un correo. |

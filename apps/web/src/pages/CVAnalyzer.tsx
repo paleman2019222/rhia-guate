@@ -94,7 +94,7 @@ export default function CVAnalyzer() {
               </div>
               {candidate.analysis.status === "completed" && (
                 <div className="mt-3 space-y-1 text-sm">
-                  <p>Puntaje: <strong>{candidate.analysis.score ?? 0}/100</strong> · Recomendación: <strong>{candidate.analysis.recommendation ?? "review"}</strong></p>
+                  <p>Puntaje: <strong>{candidate.analysis.score === undefined ? "Sin calificación" : `${candidate.analysis.score}/100`}</strong> · Recomendación: <strong>{candidate.analysis.recommendation ?? "Sin recomendación"}</strong></p>
                   {candidate.analysis.confidence !== undefined && <p>Confianza: {Math.round(candidate.analysis.confidence * 100)}%</p>}
                   <p>{candidate.analysis.summary}</p>
                   {Boolean(candidate.analysis.strengths?.length) && <p>Fortalezas: {candidate.analysis.strengths?.join(", ")}</p>}

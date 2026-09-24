@@ -18,3 +18,17 @@ Monorepo para la plataforma multiempresa de Recursos Humanos RHIA.
 5. En dos terminales, ejecuta `npm run dev:api` y `npm run dev:web`.
 
 Consulta [la documentación de API](docs/API.md), [la arquitectura](docs/ARCHITECTURE.md), [los servicios](docs/SERVICES.md) y [la integración n8n](docs/N8N_CV_ANALYZER.md).
+
+## Despliegue de la API en Render
+
+En un servicio web con el directorio raíz del repositorio, usa este comando de compilación para incluir TypeScript y las definiciones de tipos requeridas durante el build:
+
+```bash
+npm ci --include=dev && npm run build --workspace=@rhia/api
+```
+
+Comando de inicio:
+
+```bash
+npm run start --workspace=@rhia/api
+```

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { access } from "node:fs/promises";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { Candidate } from "../models/Candidate.js";
@@ -29,6 +30,22 @@ export const getCandidate = asyncHandler(async (req, res) => {
   const candidate = await Candidate.findOne({ _id: req.params.candidateId, tenant: getTenantId(req) }).populate("vacancy").lean();
   if (!candidate) throw new ApiError(404, "Candidate not found");
   res.json({ data: candidate });
+});
+
+export const downloadCandidateDocumentForTenant = asyncHandler(async (req, res) => {
+  const candidate = await Candidate.findOne({ _id: req.params.candidateId, tenant: getTenantId(req) }).lean();
+  if (!candidate) throw new ApiError(404, "Candidate not found");
+  if (!candidate.sourceDocument?.url) throw new ApiError(404, "Candidate has no CV document");
+
+  const fileName = candidate.sourceDocument.url.split(/[\\/]/).pop();
+  if (!fileName) throw new ApiError(404, "Candidate CV document not found");
+  const filePath = path.resolve(process.cwd(), "uploads", fileName);
+  try {
+    await access(filePath);
+  } catch {
+    throw new ApiError(404, "CV document is no longer available on this server");
+  }
+  res.download(filePath, candidate.sourceDocument.originalName || fileName);
 });
 
 export const createCandidate = asyncHandler(async (req, res) => {
