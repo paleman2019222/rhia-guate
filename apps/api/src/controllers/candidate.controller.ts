@@ -3,7 +3,9 @@ import { access } from "node:fs/promises";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { Candidate } from "../models/Candidate.js";
+import { QuarantinedApplication } from "../models/QuarantinedApplication.js";
 import { Vacancy } from "../models/Vacancy.js";
+import { quarantineCandidate, quarantineReasonFor } from "../services/quarantine.service.js";
 import { createAnalysisRequestId, dispatchCVAnalysis } from "../services/n8n.service.js";
 import { assertFeatureEnabled } from "../services/feature.service.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -101,7 +103,7 @@ export const requestAnalysis = asyncHandler(async (req, res) => {
 
 const callbackSchema = z.object({
   requestId: z.string().uuid(),
-  status: z.enum(["completed", "failed"]),
+  status: z.enum(["completed", "failed", "blocked"]),
   isValidCV: z.boolean().optional(),
   confidence: z.number().min(0).max(1).optional(),
   securityStatus: z.enum(["clean", "prompt_injection_detected", "not_a_cv", "needs_review"]).optional(),
@@ -121,11 +123,24 @@ export const receiveAnalysisCallback = asyncHandler(async (req, res) => {
   }
   const input = callbackSchema.parse(req.body);
   const candidate = await Candidate.findOne({ "analysis.requestId": input.requestId });
-  if (!candidate) throw new ApiError(404, "Analysis request not found");
+  if (!candidate) {
+    const quarantined = await QuarantinedApplication.findOne({ "analysis.requestId": input.requestId }).lean();
+    if (!quarantined) throw new ApiError(404, "Analysis request not found");
+    res.json({ data: { candidateId: String(quarantined._id), status: "blocked", duplicate: true } });
+    return;
+  }
+
+  const reason = quarantineReasonFor(input);
+  if (input.status === "blocked" && !reason) throw new ApiError(422, "Blocked results require a securityStatus or isValidCV=false");
+  if (reason) {
+    const candidateId = await quarantineCandidate(input.requestId, reason, input.securityFlags ?? [], input.error);
+    res.json({ data: { candidateId, status: "blocked", quarantineReason: reason } });
+    return;
+  }
 
   const analysis = candidate.analysis;
   if (!analysis) throw new ApiError(409, "Candidate analysis state is missing");
-  analysis.status = input.status;
+  analysis.status = input.status === "blocked" ? "failed" : input.status;
   analysis.isValidCV = input.isValidCV;
   analysis.confidence = input.confidence;
   analysis.securityStatus = input.securityStatus;

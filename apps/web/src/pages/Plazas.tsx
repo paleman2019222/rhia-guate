@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Sparkles, Search, MapPin, Clock, Users, MoreHorizontal, Link as LinkIcon, ExternalLink, ArchiveRestore, Eye, RefreshCw, Download, FileText } from "lucide-react";
+import { Plus, Sparkles, Search, MapPin, Clock, Users, MoreHorizontal, Link as LinkIcon, ExternalLink, ArchiveRestore, Eye, RefreshCw, Download, FileText, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -24,6 +24,7 @@ interface Plaza {
   analyzedCount: number;
   topScore: number | null;
   averageScore: number | null;
+  quarantinedCount: number;
   status: "draft" | "published" | "closed";
   createdAt: string;
 }
@@ -56,7 +57,8 @@ const workTypeToApi: Record<string, "full_time" | "part_time" | "contract" | "re
   Remoto: "remote",
 };
 
-type ApiVacancy = { _id: string; publicId?: string; title: string; department: string; location: string; workType: "full_time" | "part_time" | "contract" | "remote"; salaryMin?: number; salaryMax?: number; description: string; requirements: string[]; status: "draft" | "published" | "closed"; createdAt: string; metrics?: { applicationCount: number; analyzedCount: number; topScore: number | null; averageScore: number | null } };
+type ApiVacancy = { _id: string; publicId?: string; title: string; department: string; location: string; workType: "full_time" | "part_time" | "contract" | "remote"; salaryMin?: number; salaryMax?: number; description: string; requirements: string[]; status: "draft" | "published" | "closed"; createdAt: string; metrics?: { applicationCount: number; analyzedCount: number; quarantinedCount: number; topScore: number | null; averageScore: number | null } };
+type QuarantinedApplication = { _id: string; name: string; email: string; phone?: string; cvText?: string; sourceDocument?: { originalName?: string }; quarantineReason: "prompt_injection_detected" | "not_a_cv" | "needs_review"; quarantinedAt: string; createdAt: string; analysis?: { securityFlags?: string[]; error?: string } };
 type ApiCandidate = {
   _id: string;
   vacancy?: string | { _id: string; title: string };
@@ -135,6 +137,7 @@ const toPlaza = (vacancy: ApiVacancy): Plaza => ({
   analyzedCount: vacancy.metrics?.analyzedCount ?? 0,
   topScore: vacancy.metrics?.topScore ?? null,
   averageScore: vacancy.metrics?.averageScore ?? null,
+  quarantinedCount: vacancy.metrics?.quarantinedCount ?? 0,
   status: vacancy.status,
   createdAt: new Date(vacancy.createdAt).toLocaleDateString("es-GT", { day: "numeric", month: "short", year: "numeric" }),
 });
@@ -144,6 +147,10 @@ const Plazas = () => {
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [selectedPlazaId, setSelectedPlazaId] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [selectedQuarantinedId, setSelectedQuarantinedId] = useState<string | null>(null);
+  const [quarantinedDetail, setQuarantinedDetail] = useState<QuarantinedApplication | null>(null);
+  const [quarantined, setQuarantined] = useState<QuarantinedApplication[]>([]);
+  const [applicationTab, setApplicationTab] = useState<"candidates" | "quarantine">("candidates");
   const [candidateDetail, setCandidateDetail] = useState<ApiCandidate | null>(null);
   const [loadingVacancies, setLoadingVacancies] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -172,6 +179,7 @@ const Plazas = () => {
         return toPlaza({ ...vacancy, metrics: {
           applicationCount: item?.applicationCount ?? 0,
           analyzedCount: item?.analyzedCount ?? 0,
+          quarantinedCount: vacancy.metrics?.quarantinedCount ?? 0,
           topScore: item?.topScore ?? null,
           averageScore: item?.scoredCount ? Math.round(item.scoreSum / item.scoredCount) : null,
         } });
@@ -200,19 +208,42 @@ const Plazas = () => {
     }
   }, []);
 
+  const loadQuarantined = useCallback(async (vacancyId: string, signal?: AbortSignal) => {
+    try {
+      const response = await api<{ data: QuarantinedApplication[] }>(`/vacancies/${vacancyId}/quarantined-applications`, { signal });
+      if (!signal?.aborted) setQuarantined(response.data);
+    } catch (caught) {
+      if (!signal?.aborted) setError(caught instanceof ApiClientError ? caught.message : "No se pudo cargar la cuarentena");
+    }
+  }, []);
+
   useEffect(() => { void loadVacancies(); }, [loadVacancies]);
 
   useEffect(() => {
     if (!selectedPlazaId) {
       setCandidates([]);
+      setQuarantined([]);
       setLoadingCandidates(false);
       return;
     }
     setCandidates([]);
+    setQuarantined([]);
+    setApplicationTab("candidates");
     const controller = new AbortController();
     void loadCandidates(selectedPlazaId, controller.signal);
+    void loadQuarantined(selectedPlazaId, controller.signal);
     return () => controller.abort();
-  }, [selectedPlazaId, loadCandidates]);
+  }, [selectedPlazaId, loadCandidates, loadQuarantined]);
+
+  useEffect(() => {
+    if (!selectedQuarantinedId || !selectedPlazaId) { setQuarantinedDetail(null); return; }
+    let active = true;
+    setQuarantinedDetail(null);
+    api<{ data: QuarantinedApplication }>(`/vacancies/${selectedPlazaId}/quarantined-applications/${selectedQuarantinedId}`)
+      .then((response) => { if (active) setQuarantinedDetail(response.data); })
+      .catch((caught) => { if (active) setError(caught instanceof ApiClientError ? caught.message : "No se pudo cargar el registro aislado"); });
+    return () => { active = false; };
+  }, [selectedPlazaId, selectedQuarantinedId]);
 
   useEffect(() => {
     if (!selectedCandidateId) {
@@ -266,7 +297,7 @@ const Plazas = () => {
     try {
       const response = await api<{ data: ApiVacancy }>(`/vacancies/${plaza.id}`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) });
       const saved = toPlaza(response.data);
-      setPlazas((current) => current.map((item) => item.id === plaza.id ? { ...saved, cvCount: item.cvCount, analyzedCount: item.analyzedCount, topScore: item.topScore, averageScore: item.averageScore } : item));
+      setPlazas((current) => current.map((item) => item.id === plaza.id ? { ...saved, cvCount: item.cvCount, analyzedCount: item.analyzedCount, quarantinedCount: item.quarantinedCount, topScore: item.topScore, averageScore: item.averageScore } : item));
     } catch (caught) {
       setError(caught instanceof ApiClientError ? caught.message : "No se pudo actualizar la plaza");
     }
@@ -294,6 +325,24 @@ const Plazas = () => {
   async function refresh() {
     await loadVacancies();
     if (selectedPlazaId) await loadCandidates(selectedPlazaId);
+    if (selectedPlazaId) await loadQuarantined(selectedPlazaId);
+  }
+
+  async function downloadQuarantinedCV(application: QuarantinedApplication) {
+    if (!selectedPlazaId) return;
+    try {
+      const blob = await apiBlob(`/vacancies/${selectedPlazaId}/quarantined-applications/${application._id}/document`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = application.sourceDocument?.originalName || "cv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (caught) {
+      setError(caught instanceof ApiClientError ? caught.message : "No se pudo descargar el archivo aislado");
+    }
   }
 
   async function downloadCV(candidate: ApiCandidate) {
@@ -347,8 +396,8 @@ const Plazas = () => {
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-border bg-card p-4"><p className="text-sm text-muted-foreground">Plazas publicadas</p><p className="mt-1 text-2xl font-bold">{loadingVacancies ? "—" : plazas.filter((plaza) => plaza.status === "published").length}</p></div>
-        <div className="rounded-xl border border-border bg-card p-4"><p className="text-sm text-muted-foreground">CVs recibidos</p><p className="mt-1 text-2xl font-bold">{loadingVacancies ? "—" : totalCVs}</p></div>
-        <div className="rounded-xl border border-border bg-card p-4"><p className="text-sm text-muted-foreground">Análisis completados</p><p className="mt-1 text-2xl font-bold">{loadingVacancies ? "—" : totalAnalyzed}{!loadingVacancies && <span className="ml-2 text-sm font-normal text-muted-foreground">de {totalCVs} · {totalCVs ? Math.round(totalAnalyzed / totalCVs * 100) : 0}%</span>}</p></div>
+        <div className="rounded-xl border border-border bg-card p-4"><p className="text-sm text-muted-foreground">CVs recibidos</p><p className="mt-1 text-2xl font-bold">{loadingVacancies ? "—" : totalCVs + plazas.reduce((total, plaza) => total + plaza.quarantinedCount, 0)}</p><p className="text-xs text-muted-foreground">{totalCVs} candidatos · {plazas.reduce((total, plaza) => total + plaza.quarantinedCount, 0)} en cuarentena</p></div>
+        <div className="rounded-xl border border-border bg-card p-4"><p className="text-sm text-muted-foreground">Análisis completados</p><p className="mt-1 text-2xl font-bold">{loadingVacancies ? "—" : totalAnalyzed}{!loadingVacancies && <span className="ml-2 text-sm font-normal text-muted-foreground">de {totalCVs} candidatos · {totalCVs ? Math.round(totalAnalyzed / totalCVs * 100) : 0}%</span>}</p></div>
       </div>
 
       <div className="relative max-w-md">
@@ -373,11 +422,12 @@ const Plazas = () => {
                   </div>
                   <p className="text-sm font-medium text-foreground">{plaza.salary}</p>
                   <p className="text-xs text-muted-foreground">{plaza.analyzedCount} de {plaza.cvCount} CVs analizados ({plaza.cvCount ? Math.round(plaza.analyzedCount / plaza.cvCount * 100) : 0}%)</p>
+                  {plaza.quarantinedCount > 0 && <p className="flex items-center gap-1 text-xs text-destructive"><ShieldAlert className="h-3.5 w-3.5" /> {plaza.quarantinedCount} en cuarentena</p>}
                 </div>
                   <div className="flex flex-wrap items-center gap-4">
                   <div className="text-right">
                     <p className="text-2xl font-bold text-card-foreground">{plaza.cvCount}</p>
-                    <p className="text-xs text-muted-foreground">CVs recibidos</p>
+                    <p className="text-xs text-muted-foreground">candidatos</p>
                   </div>
                     <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
@@ -481,14 +531,19 @@ const Plazas = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedPlaza} onOpenChange={(open) => { if (!open) { setSelectedPlazaId(null); setSelectedCandidateId(null); } }}>
+      <Dialog open={!!selectedPlaza} onOpenChange={(open) => { if (!open) { setSelectedPlazaId(null); setSelectedCandidateId(null); setSelectedQuarantinedId(null); } }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           {selectedPlaza && (
             <>
               <DialogHeader>
                 <DialogTitle className="font-display">Postulaciones: {selectedPlaza.title}</DialogTitle>
-                <p className="text-sm text-muted-foreground">{selectedPlaza.cvCount} recibidas · {selectedPlaza.analyzedCount} analizadas{selectedPlaza.averageScore !== null ? ` · promedio ${selectedPlaza.averageScore}%` : ""}</p>
+                <p className="text-sm text-muted-foreground">{selectedPlaza.cvCount} candidaturas · {selectedPlaza.quarantinedCount} en cuarentena · {selectedPlaza.analyzedCount} analizadas{selectedPlaza.averageScore !== null ? ` · promedio ${selectedPlaza.averageScore}%` : ""}</p>
               </DialogHeader>
+              <div className="flex gap-2 border-b border-border pb-2" role="tablist" aria-label="Tipo de postulación">
+                <Button role="tab" aria-selected={applicationTab === "candidates"} size="sm" variant={applicationTab === "candidates" ? "default" : "ghost"} onClick={() => setApplicationTab("candidates")}>Candidatos ({selectedPlaza.cvCount})</Button>
+                <Button role="tab" aria-selected={applicationTab === "quarantine"} size="sm" variant={applicationTab === "quarantine" ? "default" : "ghost"} onClick={() => setApplicationTab("quarantine")}><ShieldAlert className="mr-2 h-4 w-4" /> Cuarentena ({selectedPlaza.quarantinedCount})</Button>
+              </div>
+              {applicationTab === "candidates" ? <>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-muted-foreground">Ordenadas por calificación de IA; las pendientes aparecen después.</p>
                 <Button size="sm" variant="outline" className="gap-2" onClick={() => void refresh()}><RefreshCw className="h-4 w-4" /> Actualizar</Button>
@@ -516,8 +571,30 @@ const Plazas = () => {
                 {loadingCandidates && <p className="text-sm text-muted-foreground">Cargando postulaciones…</p>}
                 {!loadingCandidates && candidates.length === 0 && <p className="text-sm text-muted-foreground">Aún no hay postulaciones para esta plaza. Comparte su enlace público para recibir CVs.</p>}
               </div>
+              </> : <div className="space-y-3 py-2" role="tabpanel">
+                <p className="text-xs text-muted-foreground">Registros aislados de la lista normal; no participan en el ranking ni en los porcentajes de análisis.</p>
+                {quarantined.map((application) => <div key={application._id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-destructive/5 p-4">
+                  <div><p className="font-semibold">{application.name}</p><p className="text-sm text-muted-foreground">{application.email} · {new Date(application.quarantinedAt).toLocaleString("es-GT")}</p><p className="text-xs text-destructive">{application.quarantineReason === "prompt_injection_detected" ? "Intento de instrucciones en el CV" : application.quarantineReason === "not_a_cv" ? "No es un CV" : "Requiere revisión"}</p></div>
+                  <Button size="sm" variant="outline" onClick={() => setSelectedQuarantinedId(application._id)}><Eye className="mr-2 h-4 w-4" /> Ver detalles</Button>
+                </div>)}
+                {quarantined.length === 0 && <p className="text-sm text-muted-foreground">No hay registros en cuarentena para esta plaza.</p>}
+              </div>}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedQuarantinedId} onOpenChange={(open) => { if (!open) setSelectedQuarantinedId(null); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="font-display">Postulación en cuarentena</DialogTitle></DialogHeader>
+          {!quarantinedDetail && <p className="text-sm text-muted-foreground">Cargando detalles…</p>}
+          {quarantinedDetail && <div className="space-y-4 text-sm">
+            <p><span className="font-semibold">{quarantinedDetail.name}</span> · {quarantinedDetail.email}{quarantinedDetail.phone ? ` · ${quarantinedDetail.phone}` : ""}</p>
+            <p className="rounded-lg border border-destructive/25 bg-destructive/5 p-3">Motivo: {quarantinedDetail.quarantineReason === "prompt_injection_detected" ? "Intento de prompt injection" : quarantinedDetail.quarantineReason === "not_a_cv" ? "El contenido no es un CV" : "Requiere revisión de seguridad"}. Este registro no fue evaluado como candidato.</p>
+            {Boolean(quarantinedDetail.analysis?.securityFlags?.length) && <section><h4 className="font-semibold">Señales detectadas</h4><ul className="mt-1 list-inside list-disc text-muted-foreground">{quarantinedDetail.analysis?.securityFlags?.map((flag, index) => <li key={`${index}-${flag}`}>{flag}</li>)}</ul></section>}
+            {quarantinedDetail.cvText && <section><h4 className="font-semibold">Texto recibido (no confiable)</h4><div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border p-3 text-muted-foreground">{quarantinedDetail.cvText}</div></section>}
+            {quarantinedDetail.sourceDocument?.originalName && <section className="flex items-center gap-3"><FileText className="h-4 w-4" /><span>{quarantinedDetail.sourceDocument.originalName}</span><Button size="sm" variant="outline" onClick={() => void downloadQuarantinedCV(quarantinedDetail)}><Download className="mr-2 h-4 w-4" /> Descargar</Button></section>}
+          </div>}
         </DialogContent>
       </Dialog>
 

@@ -2,9 +2,11 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { Candidate } from "../models/Candidate.js";
+import { QuarantinedApplication } from "../models/QuarantinedApplication.js";
 import { Tenant } from "../models/Tenant.js";
 import { Vacancy } from "../models/Vacancy.js";
 import { assertFeatureEnabled } from "../services/feature.service.js";
+import { quarantineReasonFor } from "../services/quarantine.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -24,11 +26,11 @@ const resultSchema = z.object({
     securityStatus: z.enum(["clean", "prompt_injection_detected", "not_a_cv", "needs_review"]),
     securityFlags: z.array(z.string().max(500)).max(30),
     confidence: z.number().min(0).max(1),
-    score: z.number().min(0).max(100),
-    summary: z.string().min(1).max(5000),
-    strengths: z.array(z.string().max(500)).max(30),
-    gaps: z.array(z.string().max(500)).max(30),
-    recommendation: z.enum(["advance", "review", "reject"]),
+    score: z.number().min(0).max(100).optional(),
+    summary: z.string().min(1).max(5000).optional(),
+    strengths: z.array(z.string().max(500)).max(30).optional(),
+    gaps: z.array(z.string().max(500)).max(30).optional(),
+    recommendation: z.enum(["advance", "review", "reject"]).optional(),
   }).strict(),
 }).strict();
 
@@ -88,10 +90,11 @@ export const receiveEmailAnalysis = asyncHandler(async (req, res) => {
   const input = resultSchema.parse(req.body);
   const tenant = await resolveCompany(companySlug);
   const tenantId = String(tenant._id);
-  const existing = await Candidate.findOne({ tenant: tenant._id, emailMessageId: input.messageId });
+  const existing = await Candidate.findOne({ tenant: tenant._id, emailMessageId: input.messageId })
+    ?? await QuarantinedApplication.findOne({ tenant: tenant._id, emailMessageId: input.messageId });
   if (existing) {
     if (String(existing.vacancy) !== input.vacancyId) throw new ApiError(409, "Email was already assigned to another vacancy");
-    res.json({ data: { candidateId: String(existing._id), status: existing.analysis?.status, duplicate: true } });
+    res.json({ data: { candidateId: String(existing._id), status: existing instanceof Candidate ? existing.analysis?.status : "blocked", duplicate: true } });
     return;
   }
 
@@ -100,25 +103,32 @@ export const receiveEmailAnalysis = asyncHandler(async (req, res) => {
 
   try {
     const now = new Date();
-    const candidate = await Candidate.create({
+    const reason = quarantineReasonFor(input.analysis);
+    if (!reason && input.analysis.score === undefined) throw new ApiError(422, "Clean analyses require a score");
+    const record = {
       tenant: tenantId,
       vacancy: vacancy._id,
       emailMessageId: input.messageId,
       ...input.candidate,
       analysis: {
-        status: "completed",
+        status: reason ? "failed" : "completed",
         requestId: randomUUID(),
         requestedAt: now,
         completedAt: now,
         ...input.analysis,
+        ...(reason ? { isValidCV: false, securityStatus: reason, score: undefined, recommendation: undefined, summary: undefined, strengths: [], gaps: [] } : {}),
       },
-    });
-    res.status(201).json({ data: { candidateId: String(candidate._id), status: "completed", duplicate: false } });
+    };
+    const candidate = reason
+      ? await QuarantinedApplication.create({ ...record, quarantinedAt: now, quarantineReason: reason })
+      : await Candidate.create(record);
+    res.status(201).json({ data: { candidateId: String(candidate._id), status: reason ? "blocked" : "completed", duplicate: false } });
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === 11000) {
-      const duplicate = await Candidate.findOne({ tenant: tenant._id, emailMessageId: input.messageId });
+      const duplicate = await Candidate.findOne({ tenant: tenant._id, emailMessageId: input.messageId })
+        ?? await QuarantinedApplication.findOne({ tenant: tenant._id, emailMessageId: input.messageId });
       if (duplicate && String(duplicate.vacancy) === input.vacancyId) {
-        res.json({ data: { candidateId: String(duplicate._id), status: duplicate.analysis?.status, duplicate: true } });
+        res.json({ data: { candidateId: String(duplicate._id), status: duplicate instanceof Candidate ? duplicate.analysis?.status : "blocked", duplicate: true } });
         return;
       }
     }

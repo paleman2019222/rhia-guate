@@ -69,7 +69,25 @@ Body JSON:
 
 `vacancyId` debe venir de la respuesta de **Obtener vacante**; `messageId` debe ser el ID estable que entrega Gmail, no un ID nuevo generado para cada ejecución. `candidate.name` sale del asunto, `candidate.email` del remitente y `candidate.cvText` del texto extraído del PDF. El resultado de la IA se coloca en `analysis` como objeto JSON. `phone` es opcional. No envíes el archivo binario en este body.
 
-Al crear un candidato responde `201` con `data.candidateId`, `data.status` y `data.duplicate: false`. Si n8n reintenta el mismo `messageId`, responde `200`, `duplicate: true` y el ID ya creado. Si ese mensaje se intenta asignar a otra plaza, responde `409`. Marca el correo como leído sólo después de recibir `200` o `201` del callback. El análisis queda visible en **Analizador de CVs** y en los candidatos de la plaza.
+Al crear un candidato responde `201` con `data.candidateId`, `data.status` y `data.duplicate: false`. Si n8n reintenta el mismo `messageId`, responde `200`, `duplicate: true` y el ID ya creado. Si ese mensaje se intenta asignar a otra plaza, responde `409`. Marca el correo como leído sólo después de recibir `200` o `201` del callback. El análisis limpio queda visible entre los candidatos de la plaza.
+
+Si el checkpoint de seguridad detecta prompt injection, documento que no es CV o contenido dudoso, utiliza **la misma URL fija** pero con `analysis` sin puntuación. Por ejemplo:
+
+```json
+{
+  "messageId": "ID-estable-del-mensaje",
+  "vacancyId": "507f1f77bcf86cd799439011",
+  "candidate": { "name": "Nombre del asunto", "email": "origen@example.com", "cvText": "Texto extraído del PDF..." },
+  "analysis": {
+    "isValidCV": false,
+    "securityStatus": "prompt_injection_detected",
+    "securityFlags": ["Instrucciones dirigidas al modelo"],
+    "confidence": 0.9
+  }
+}
+```
+
+La API lo guarda directamente en `quarantinedapplications` y responde `status: "blocked"`. La misma regla aplica a `not_a_cv` y `needs_review`. No ejecutes el análisis de ajuste ni envíes `score` en esta rama.
 
 ## Orden de nodos
 

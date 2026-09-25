@@ -47,11 +47,14 @@ Estas rutas requieren `super_admin`. El portal web `/admin` permite activar/desa
 
 | Método y ruta | Roles | Descripción |
 |---|---|---|
-| `GET /vacancies?status=&search=` | Autenticado | Lista vacantes de la empresa con `metrics.applicationCount`, `analyzedCount`, `topScore` y `averageScore` calculados a partir de postulaciones reales. Los puntajes no disponibles son `null`. |
+| `GET /vacancies?status=&search=` | Autenticado | Lista vacantes con `metrics.applicationCount` (candidatos normales), `quarantinedCount` (colección separada), `analyzedCount`, `topScore` y `averageScore`. Los puntajes no disponibles son `null`. |
 | `POST /vacancies` | Admin, HR | Crea una vacante. |
 | `GET /vacancies/:vacancyId` | Autenticado | Detalle de una vacante. |
 | `PATCH /vacancies/:vacancyId` | Admin, HR | Actualiza o cierra una vacante. |
 | `POST /vacancies/:vacancyId/public-link` | Admin, HR | Genera o recupera el identificador único para su enlace público de postulación. |
+| `GET /vacancies/:vacancyId/quarantined-applications` | Autenticado | Lista registros aislados de esa plaza, sin el texto completo del CV. |
+| `GET /vacancies/:vacancyId/quarantined-applications/:applicationId` | Autenticado | Detalle del registro aislado, incluidas señales y texto del CV. |
+| `GET /vacancies/:vacancyId/quarantined-applications/:applicationId/document` | Autenticado | Descarga el documento aislado si el archivo sigue disponible en el servidor. |
 
 ## Candidatos y análisis de CV
 
@@ -66,9 +69,11 @@ Estas rutas requieren `super_admin`. El portal web `/admin` permite activar/desa
 | `GET /integrations/n8n/email/companies/:companySlug/vacancies?title=` | Token workflow | Obtiene la plaza publicada por título exacto para un correo. |
 | `POST /integrations/n8n/email/companies/:companySlug/cv-analysis` | Secret n8n | Registra el candidato y su análisis recibido por Gmail. |
 
-El callback debe incluir header `x-n8n-callback-secret` y body `requestId`, `status` (`completed` o `failed`). Para un resultado completado puede incluir `isValidCV`, `securityStatus`, `securityFlags`, `confidence`, `score`, `summary`, `strengths`, `gaps`, `recommendation` y `rawResponse`. Para un fallo debe incluir `error`.
+El callback debe incluir header `x-n8n-callback-secret` y body `requestId`, `status` (`completed`, `failed` o `blocked`). `blocked` requiere `securityStatus` (`prompt_injection_detected`, `not_a_cv` o `needs_review`) o `isValidCV: false`. También se aíslan los resultados antiguos que indiquen esos valores aunque lleven `status: completed`. La API mueve la postulación de `candidates` a `quarantinedapplications` de forma transaccional; mantiene el mismo `_id` y omite la puntuación. Un reintento del mismo `requestId` responde `200` y `duplicate: true`. Para un resultado limpio completado puede incluir `isValidCV`, `securityStatus`, `securityFlags`, `confidence`, `score`, `summary`, `strengths`, `gaps`, `recommendation` y `rawResponse`. Para un fallo técnico debe incluir `error`.
 
 La integración de Gmail se documenta en [N8N_EMAIL_CV.md](N8N_EMAIL_CV.md). Ambas rutas están limitadas a una empresa activa con la función `cvAnalyzer` habilitada.
+
+Para aislar registros **anteriores** al despliegue que ya tengan `securityStatus` sospechoso o `isValidCV: false`, ejecuta primero `npm run quarantine:backfill --workspace=@rhia/api` (solo muestra cuántos hay) y después `npm run quarantine:backfill --workspace=@rhia/api -- --apply` con acceso a la misma base MongoDB. No se ejecuta automáticamente en el arranque.
 
 ## Salud
 

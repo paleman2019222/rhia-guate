@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { Candidate } from "../models/Candidate.js";
+import { QuarantinedApplication } from "../models/QuarantinedApplication.js";
 import { Vacancy } from "../models/Vacancy.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -39,7 +40,7 @@ export const listVacancies = asyncHandler(async (req, res) => {
       { $ne: ["$analysis.isValidCV", false] },
     ],
   };
-  const [vacancies, metrics] = await Promise.all([
+  const [vacancies, metrics, quarantinedMetrics] = await Promise.all([
     Vacancy.find(filter).sort({ createdAt: -1 }).lean(),
     Candidate.aggregate<{
       _id: Types.ObjectId;
@@ -59,14 +60,20 @@ export const listVacancies = asyncHandler(async (req, res) => {
         scoreSum: { $sum: { $cond: [scored, "$analysis.score", 0] } },
       } },
     ]),
+    QuarantinedApplication.aggregate<{ _id: Types.ObjectId; count: number }>([
+      { $match: { tenant: new Types.ObjectId(tenant) } },
+      { $group: { _id: "$vacancy", count: { $sum: 1 } } },
+    ]),
   ]);
   const byVacancy = new Map(metrics.map((item) => [String(item._id), item]));
+  const quarantinedByVacancy = new Map(quarantinedMetrics.map((item) => [String(item._id), item.count]));
   res.json({ data: vacancies.map((vacancy) => {
     const item = byVacancy.get(String(vacancy._id));
     return {
       ...vacancy,
       metrics: {
         applicationCount: item?.applicationCount ?? 0,
+        quarantinedCount: quarantinedByVacancy.get(String(vacancy._id)) ?? 0,
         analyzedCount: item?.analyzedCount ?? 0,
         topScore: item?.topScore ?? null,
         averageScore: item?.scoredCount ? Math.round(item.scoreSum / item.scoredCount) : null,
